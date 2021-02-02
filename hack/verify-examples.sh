@@ -16,7 +16,14 @@
 set -euo pipefail
 
 echo "begin to create deployment examples ..."
-kubectl apply -f deploy/example/storageclass-blobfuse.yaml
+if [[ "$1" == "azurestackcloud" ]]; then
+    STORAGECLASS_FILE="deploy/example/storageclass-blobfuse-azurestack.yaml"
+    sed -i "s/AZURE_STACK_STORAGE_ENDPOINT_SUFFIX/$2/g" $STORAGECLASS_FILE
+    kubectl apply -f $STORAGECLASS_FILE
+else
+    kubectl apply -f deploy/example/storageclass-blobfuse.yaml
+fi
+
 kubectl apply -f deploy/example/deployment.yaml
 kubectl apply -f deploy/example/statefulset.yaml
 kubectl apply -f deploy/example/statefulset-nonroot.yaml

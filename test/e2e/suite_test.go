@@ -117,9 +117,14 @@ var _ = ginkgo.BeforeSuite(func() {
 })
 
 var _ = ginkgo.AfterSuite(func() {
+	cloud := "azurepubliccloud"
+	azureStackStorageEndpointSuffix := os.Getenv("AZURE_STACK_STORAGE_ENDPOINT_SUFFIX")
+	if isAzureStackCloud {
+		cloud = "azurestackcloud"
+	}
 	createExampleDeployment := testCmd{
 		command:  "bash",
-		args:     []string{"hack/verify-examples.sh"},
+		args:     []string{"hack/verify-examples.sh", cloud, azureStackStorageEndpointSuffix},
 		startLog: "create example deployments",
 		endLog:   "example deployments created",
 	}

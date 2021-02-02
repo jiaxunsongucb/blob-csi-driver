@@ -17,16 +17,12 @@ limitations under the License.
 package testsuites
 
 import (
-	"fmt"
-
 	"github.com/onsi/ginkgo"
 
-	"sigs.k8s.io/blob-csi-driver/pkg/blob"
 	"sigs.k8s.io/blob-csi-driver/test/e2e/driver"
 
 	v1 "k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 // PreProvisionedExistingCredentialsTest will provision required StorageClass(es), PVC(s) and Pod(s)
@@ -38,40 +34,16 @@ type PreProvisionedExistingCredentialsTest struct {
 
 func (t *PreProvisionedExistingCredentialsTest) Run(client clientset.Interface, namespace *v1.Namespace) {
 	for _, pod := range t.Pods {
-		for n, volume := range pod.Volumes {
-			resourceGroupName, accountName, containerName, err := blob.GetContainerInfo(volume.VolumeID)
-			if err != nil {
-				framework.ExpectNoError(err, fmt.Sprintf("Error GetContainerInfo from volumeID(%s): %v", volume.VolumeID, err))
-				return
-			}
-			parameters := map[string]string{
-				"resourceGroup":  resourceGroupName,
-				"storageAccount": accountName,
-				"containerName":  containerName,
-			}
-
-			ginkgo.By("creating the storageclass with existing credentials")
-			sc := t.CSIDriver.GetPreProvisionStorageClass(parameters, volume.MountOptions, volume.ReclaimPolicy, volume.VolumeBindingMode, volume.AllowedTopologyValues, namespace.Name)
-			tsc := NewTestStorageClass(client, namespace, sc)
-			createdStorageClass := tsc.Create()
-			defer tsc.Cleanup()
-
-			ginkgo.By("creating pvc with storageclass")
-			tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, &createdStorageClass)
-			tpvc.Create()
-			defer tpvc.Cleanup()
-
-			ginkgo.By("validating the pvc")
-			tpvc.WaitForBound()
-			tpvc.ValidateProvisionedPersistentVolume()
-
-			tpod := NewTestPod(client, namespace, pod.Cmd)
-			tpod.SetupVolume(tpvc.persistentVolumeClaim, fmt.Sprintf("%s%d", volume.VolumeMount.NameGenerate, n+1), fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, n+1), volume.VolumeMount.ReadOnly)
-			ginkgo.By("deploying the pod")
-			tpod.Create()
-			defer tpod.Cleanup()
-			ginkgo.By("checking that the pods command exits with no error")
-			tpod.WaitForSuccess()
+		tpod, cleanup := pod.SetupWithExistingCredentials(client, namespace, t.CSIDriver)
+		// defer must be called here for resources not get removed before using them
+		for i := range cleanup {
+			defer cleanup[i]()
 		}
+
+		ginkgo.By("deploying the pod")
+		tpod.Create()
+		defer tpod.Cleanup()
+		ginkgo.By("checking that the pods command exits with no error")
+		tpod.WaitForSuccess()
 	}
 }

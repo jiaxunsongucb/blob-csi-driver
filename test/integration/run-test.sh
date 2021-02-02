@@ -30,6 +30,7 @@ readonly staging_target_path="$2"
 readonly target_path="$3"
 readonly resource_group="$4"
 readonly cloud="$5"
+readonly params="storageEndpointSuffix=core.windows.net"
 
 echo "Begin to run integration test on $cloud..."
 
@@ -56,7 +57,7 @@ csc controller validate-volume-capabilities --endpoint "$endpoint" --cap 1,block
 
 if [[ "$cloud" != "AzureChinaCloud" ]]; then
   echo "stage volume test:"
-  csc node stage --endpoint "$endpoint" --cap 1,block --staging-target-path "$staging_target_path" "$volumeid"
+  csc node stage --endpoint "$endpoint" --cap 1,block --vol-context "$params" --staging-target-path "$staging_target_path" "$volumeid"
 
   echo "publish volume test:"
   csc node publish --endpoint "$endpoint" --cap 1,block --staging-target-path "$staging_target_path" --target-path "$target_path" "$volumeid"

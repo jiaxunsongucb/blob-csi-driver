@@ -21,12 +21,14 @@ import (
 	"os"
 	"strings"
 
+	"sigs.k8s.io/blob-csi-driver/pkg/blob"
 	"sigs.k8s.io/blob-csi-driver/test/e2e/driver"
 
 	"github.com/onsi/ginkgo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 type PodDetails struct {
@@ -67,6 +69,7 @@ const (
 
 var (
 	isAzureStackCloud                            = strings.EqualFold(os.Getenv("AZURE_CLOUD_NAME"), "AZURESTACKCLOUD")
+	azureStackStorageEndpointSuffix              = os.Getenv("AZURE_STACK_STORAGE_ENDPOINT_SUFFIX")
 	azurePublicCloudSupportedStorageAccountTypes = []string{"Standard_LRS", "Premium_LRS", "Standard_GRS", "Standard_RAGRS"}
 	azureStackCloudSupportedStorageAccountTypes  = []string{"Standard_LRS", "Premium_LRS"}
 )
@@ -139,10 +142,49 @@ func (pod *PodDetails) SetupWithPreProvisionedVolumes(client clientset.Interface
 	return tpod, cleanupFuncs
 }
 
+func (pod *PodDetails) SetupWithExistingCredentials(client clientset.Interface, namespace *v1.Namespace, csiDriver driver.PreProvisionedVolumeTestDriver) (*TestPod, []func()) {
+	tpod := NewTestPod(client, namespace, pod.Cmd)
+	cleanupFuncs := make([]func(), 0)
+	for n, volume := range pod.Volumes {
+		resourceGroupName, accountName, containerName, err := blob.GetContainerInfo(volume.VolumeID)
+		if err != nil {
+			framework.ExpectNoError(err, fmt.Sprintf("Error GetContainerInfo from volumeID(%s): %v", volume.VolumeID, err))
+		}
+		parameters := map[string]string{
+			"resourceGroup":  resourceGroupName,
+			"storageAccount": accountName,
+			"containerName":  containerName,
+		}
+		if isAzureStackCloud {
+			parameters["storageendpointsuffix"] = azureStackStorageEndpointSuffix
+		}
+
+		ginkgo.By("creating the storageclass with existing credentials")
+		sc := csiDriver.GetPreProvisionStorageClass(parameters, volume.MountOptions, volume.ReclaimPolicy, volume.VolumeBindingMode, volume.AllowedTopologyValues, namespace.Name)
+		tsc := NewTestStorageClass(client, namespace, sc)
+		createdStorageClass := tsc.Create()
+		cleanupFuncs = append(cleanupFuncs, tsc.Cleanup)
+
+		ginkgo.By("creating pvc with storageclass")
+		tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, &createdStorageClass)
+		tpvc.Create()
+		cleanupFuncs = append(cleanupFuncs, tpvc.Cleanup)
+
+		ginkgo.By("validating the pvc")
+		tpvc.WaitForBound()
+		tpvc.ValidateProvisionedPersistentVolume()
+		tpod.SetupVolume(tpvc.persistentVolumeClaim, fmt.Sprintf("%s%d", volume.VolumeMount.NameGenerate, n+1), fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, n+1), volume.VolumeMount.ReadOnly)
+	}
+	return tpod, cleanupFuncs
+}
+
 func (pod *PodDetails) SetupDeployment(client clientset.Interface, namespace *v1.Namespace, csiDriver driver.DynamicPVTestDriver, storageClassParameters map[string]string) (*TestDeployment, []func()) {
 	cleanupFuncs := make([]func(), 0)
 	volume := pod.Volumes[0]
 	ginkgo.By("setting up the StorageClass")
+	if isAzureStackCloud {
+		storageClassParameters["storageendpointsuffix"] = azureStackStorageEndpointSuffix
+	}
 	storageClass := csiDriver.GetDynamicProvisionStorageClass(storageClassParameters, volume.MountOptions, volume.ReclaimPolicy, volume.VolumeBindingMode, volume.AllowedTopologyValues, namespace.Name)
 	tsc := NewTestStorageClass(client, namespace, storageClass)
 	createdStorageClass := tsc.Create()
@@ -163,6 +205,9 @@ func (pod *PodDetails) SetupDeployment(client clientset.Interface, namespace *v1
 func (volume *VolumeDetails) SetupDynamicPersistentVolumeClaim(client clientset.Interface, namespace *v1.Namespace, csiDriver driver.DynamicPVTestDriver, storageClassParameters map[string]string) (*TestPersistentVolumeClaim, []func()) {
 	cleanupFuncs := make([]func(), 0)
 	ginkgo.By("setting up the StorageClass")
+	if isAzureStackCloud {
+		storageClassParameters["storageendpointsuffix"] = azureStackStorageEndpointSuffix
+	}
 	storageClass := csiDriver.GetDynamicProvisionStorageClass(storageClassParameters, volume.MountOptions, volume.ReclaimPolicy, volume.VolumeBindingMode, volume.AllowedTopologyValues, namespace.Name)
 	tsc := NewTestStorageClass(client, namespace, storageClass)
 	createdStorageClass := tsc.Create()
@@ -196,6 +241,9 @@ func (volume *VolumeDetails) SetupPreProvisionedPersistentVolumeClaim(client cli
 		attrib["containerName"] = volume.ContainerName
 	}
 	nodeStageSecretRef := volume.NodeStageSecretRef
+	if isAzureStackCloud {
+		attrib["storageendpointsuffix"] = azureStackStorageEndpointSuffix
+	}
 	pv := csiDriver.GetPersistentVolume(volume.VolumeID, volume.FSType, volume.ClaimSize, volume.ReclaimPolicy, namespace.Name, attrib, nodeStageSecretRef)
 	tpv := NewTestPreProvisionedPersistentVolume(client, pv)
 	tpv.Create()

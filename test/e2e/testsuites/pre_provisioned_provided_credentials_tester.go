@@ -56,17 +56,17 @@ func (t *PreProvisionedProvidedCredentiasTest) Run(client clientset.Interface, n
 			defer tsecret.Cleanup()
 
 			pod.Volumes[n].ContainerName = containerName
-			tpod, cleanup := pod.SetupWithPreProvisionedVolumes(client, namespace, t.CSIDriver)
-			// defer must be called here for resources not get removed before using them
-			for i := range cleanup {
-				defer cleanup[i]()
-			}
-
-			ginkgo.By("deploying the pod")
-			tpod.Create()
-			defer tpod.Cleanup()
-			ginkgo.By("checking that the pods command exits with no error")
-			tpod.WaitForSuccess()
 		}
+		tpod, cleanup := pod.SetupWithPreProvisionedVolumes(client, namespace, t.CSIDriver)
+		// defer must be called here for resources not get removed before using them
+		for i := range cleanup {
+			defer cleanup[i]()
+		}
+
+		ginkgo.By("deploying the pod")
+		tpod.Create()
+		defer tpod.Cleanup()
+		ginkgo.By("checking that the pods command exits with no error")
+		tpod.WaitForSuccess()
 	}
 }
